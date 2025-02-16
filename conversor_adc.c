@@ -2,8 +2,12 @@
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
 #include "hardware/pwm.h"
+#include "hardware/i2c.h"
+#include "inc/ssd1306.h"
+#include "inc/font.h"
 
 const int BUT_A = 5;     // Pino do botão A
+const int GREEN_LED = 11; // Pino do LED Verde
 const int BLUE_LED = 12;  // Pino do LED Azul
 const int RED_LED = 13;   // Pino do LED Vermelho
 #define VRX 27            // Pino do eixo X do joystick
@@ -11,6 +15,13 @@ const int RED_LED = 13;   // Pino do LED Vermelho
 #define SW 22             // Pino do botão do joystick
 #define ADC_CHANNEL_0 0   // Canal ADC para o eixo X
 #define ADC_CHANNEL_1 1   // Canal ADC para o eixo Y
+
+#define I2C_PORT i2c1
+#define I2C_ADDR 0x3C
+#define I2C_SDA 14
+#define I2C_SCL 15
+
+ssd1306_t ssd;
 
 const float DIVIDER_PWM = 16.0;  // Divisor do clock para o PWM
 const uint16_t PERIOD = 4096;    // Período do PWM (12 bits)
@@ -20,6 +31,7 @@ const uint16_t DEAD_ZONE = 200;  // Zona morta ao redor do centro
 uint slice_led_b, slice_led_r;   // Slices de PWM para os LEDs
 
 bool pwm_enabled = true; // Flag para verificar se o PWM está habilitado
+bool double_border = false; // Flag para verificar se a borda dupla está habilitada
 
 // Função de configuração geral
 void setup();
@@ -32,9 +44,15 @@ void joystick_read_axis(uint16_t *vrx_value, uint16_t *vry_value);
 // Função para mapear o valor do joystick para o brilho do LED
 uint16_t map_joystick_to_brightness(uint16_t joystick_value);
 static void irq_handler(uint gpio, uint32_t events);
+void i2c_setup();
+void draw_square(uint8_t x, uint8_t y);
+void move_square(uint8_t *x, uint8_t *y, uint16_t vrx_value, uint16_t vry_value);
+void draw_border();
+void toggle_border();
 
 int main()
 {
+    uint8_t square_x = 64, square_y = 32;
     uint16_t vrx_value, vry_value;
     setup();
 
@@ -50,6 +68,8 @@ int main()
         uint16_t red_brightness = map_joystick_to_brightness(vrx_value);
         pwm_set_gpio_level(RED_LED, red_brightness);
 
+        move_square(&square_x, &square_y, vrx_value, vry_value);
+
         sleep_ms(100); // Pequeno delay para a próxima leitura
     }
 }
@@ -59,6 +79,7 @@ void setup()
 {
     stdio_init_all();              // Inicializa a comunicação serial
     setup_joystick();              // Configura o joystick
+    i2c_setup();                   // Configura o display OLED
     setup_pwm_led(BLUE_LED, &slice_led_b); // Configura PWM para o LED Azul
     setup_pwm_led(RED_LED, &slice_led_r);  // Configura PWM para o LED Vermelho
     gpio_init(GREEN_LED);          // Inicializa o pino do LED Verde
@@ -148,5 +169,69 @@ static void irq_handler(uint gpio, uint32_t events) {
 
         if (pwm_enabled) return; // Se o PWM estiver habilitado, não faz nada
         gpio_put(GREEN_LED, !gpio_get(GREEN_LED)); // Inverte o estado do LED Verde
+
+        toggle_border(); // Alterna entre borda simples e dupla
     }
+}
+
+void i2c_setup() {
+    // Inicialização do I2C em 400 kHz
+    i2c_init(I2C_PORT, 400 * 1000);
+
+    // Configuração dos pinos SDA e SCL
+    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C_SDA);
+    gpio_pull_up(I2C_SCL);
+
+    ssd1306_init(&ssd, WIDTH, HEIGHT, false, I2C_ADDR, I2C_PORT); // Inicializa o display OLED
+    ssd1306_config(&ssd); // Configura o display OLED
+    ssd1306_fill(&ssd, false); // Limpa o display OLED
+    ssd1306_send_data(&ssd); // Envia os dados para o display OLED
+}
+
+void draw_square(uint8_t x, uint8_t y) {
+    ssd1306_fill(&ssd, false);       // Limpa a tela
+    draw_border();                   // Redesenha a borda antes de desenhar o quadrado
+    ssd1306_draw_square(&ssd, x, y); // Desenha o quadrado na posição atualizada
+    ssd1306_send_data(&ssd);         // Envia os dados para o display
+}
+
+// valores máximo e mínimo de vrx e vry [0, 4095]
+// valores máximo e mínimo de x e y [0, 128] e [0, 64]
+void move_square(uint8_t *x, uint8_t *y, uint16_t vrx_value, uint16_t vry_value) {
+    uint8_t speed = 8;
+    
+    if (vrx_value < CENTER_VALUE - DEAD_ZONE || vrx_value > CENTER_VALUE + DEAD_ZONE) {
+        if (vrx_value < CENTER_VALUE) {
+            if (*x > 1) *x -= speed;  // Garante que não ultrapasse a borda esquerda
+        } else {
+            if (*x < WIDTH - 9) *x += speed; // Garante que não ultrapasse a borda direita
+        }
+    }
+
+    if (vry_value < CENTER_VALUE - DEAD_ZONE || vry_value > CENTER_VALUE + DEAD_ZONE) {
+        if (vry_value < CENTER_VALUE) {
+            if (*y < HEIGHT - 9) *y += speed; // Garante que não ultrapasse a borda inferior
+        } else {
+            if (*y > 1) *y -= speed; // Garante que não ultrapasse a borda superior
+        }
+    }
+
+    draw_square(*x, *y); // Atualiza a tela com a nova posição do quadrado
+}
+
+// Desenhara a borda do display
+void draw_border() {
+    ssd1306_rect(&ssd, 0, 0, WIDTH, HEIGHT, true, false);
+
+    if (double_border) {
+        ssd1306_rect(&ssd, 1, 1, WIDTH - 2, HEIGHT - 2, true, false);
+    }
+
+    ssd1306_send_data(&ssd);
+}
+
+void toggle_border() {
+    double_border = !double_border; // Alterna entre borda simples e dupla
 }
