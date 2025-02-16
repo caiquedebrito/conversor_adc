@@ -61,6 +61,8 @@ void setup()
     setup_joystick();              // Configura o joystick
     setup_pwm_led(BLUE_LED, &slice_led_b); // Configura PWM para o LED Azul
     setup_pwm_led(RED_LED, &slice_led_r);  // Configura PWM para o LED Vermelho
+    gpio_init(GREEN_LED);          // Inicializa o pino do LED Verde
+    gpio_set_dir(GREEN_LED, GPIO_OUT); // Define o pino do LED Verde como saída
     gpio_init(BUT_A);              // Inicializa o pino do botão A
     gpio_set_dir(BUT_A, GPIO_IN);  // Define o pino do botão A como entrada
     gpio_pull_up(BUT_A);           // Habilita o pull-up no pino do botão A
@@ -72,9 +74,9 @@ void setup_joystick()
     adc_init();                    // Inicializa o ADC
     adc_gpio_init(VRX);            // Configura o pino do eixo X
     adc_gpio_init(VRY);            // Configura o pino do eixo Y
-    adc_gpio_init(SW);             // Configura o pino do botão
     gpio_set_dir(SW, GPIO_IN);     // Define o pino do botão como entrada
     gpio_pull_up(SW);              // Habilita o pull-up no pino do botão
+    gpio_set_irq_enabled_with_callback(SW, GPIO_IRQ_EDGE_FALL, true, &irq_handler); // Habilita a interrupção no botão A
 }
 
 void setup_pwm_led(uint led, uint *slice)
@@ -122,18 +124,29 @@ uint16_t map_joystick_to_brightness(uint16_t joystick_value)
 }
 
 static void irq_handler(uint gpio, uint32_t events) {
-    static volatile uint32_t last_time = 0; // Tempo da última pressão do botão A
-    volatile uint32_t current_time = to_ms_since_boot(get_absolute_time()); // Tempo atual da pressão do botão A
+    static volatile uint32_t last_time_a = 0; // Tempo da última pressão do botão A
+    volatile uint32_t current_time_a = to_ms_since_boot(get_absolute_time()); // Tempo atual da pressão do botão A
+    static volatile uint32_t last_time_j = 0; // Tempo da última pressão do botão do joystick
+    volatile uint32_t current_time_j = to_ms_since_boot(get_absolute_time()); // Tempo atual da pressão do botão do joystick
+
     // Verifica se o botão pressionado foi o A
-    if (current_time - last_time < 200) return; // Verifica se o tempo de debounce foi atingido
-    last_time = current_time;
-    
-    if (pwm_enabled) {
-        pwm_enabled = false; // Desativa o PWM
-    } else {
-        pwm_enabled = true; // Ativa o PWM
+    if (gpio == BUT_A) {
+        if (current_time_a - last_time_a < 200) return; // Verifica se o tempo de debounce foi atingido
+        last_time_a = current_time_a;
+
+        pwm_enabled = !pwm_enabled;
+        // Desativar o PWM dos LEDs
+        pwm_set_enabled(slice_led_b, pwm_enabled);
+        pwm_set_enabled(slice_led_r, pwm_enabled);
+        return;
     }
-    // Desativar o PWM dos LEDs
-    pwm_set_enabled(slice_led_b, pwm_enabled);
-    pwm_set_enabled(slice_led_r, pwm_enabled);
+
+    // Verifica se o botão pressionado foi o do joystick
+    if (gpio == SW) {
+        if (current_time_j - last_time_j < 200) return; // Verifica se o tempo de debounce foi atingido
+        last_time_j = current_time_j;
+
+        if (pwm_enabled) return; // Se o PWM estiver habilitado, não faz nada
+        gpio_put(GREEN_LED, !gpio_get(GREEN_LED)); // Inverte o estado do LED Verde
+    }
 }
