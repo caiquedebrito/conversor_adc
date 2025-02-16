@@ -46,7 +46,10 @@ pico_enable_stdio_usb(conversor_adc 1)
 
 # Add the standard library to the build
 target_link_libraries(conversor_adc
-        pico_stdlib)
+        pico_stdlib
+        hardware_adc
+        hardware_pwm
+        )
 
 # Add the standard include files to the build
 target_include_directories(conversor_adc PRIVATE
