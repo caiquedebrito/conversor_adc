@@ -63,7 +63,7 @@ Para executar este projeto, você precisará de:
 7. Pressione os **botões** para alternar os LEDs e modificar a borda do display.
 
 ## 📷 Demonstração
-🎥 Um vídeo demonstrando o funcionamento do projeto pode ser acessado aqui: **[Link do Vídeo](https://youtube.com/SEU_VIDEO_AQUI)**.
+🎥 Um vídeo demonstrando o funcionamento do projeto pode ser acessado aqui: **[Link do Vídeo](https://youtube.com/shorts/05nd7SysDb4?si=NhPPZ0Mrn5VFVD7K)**.
 
 ## 📜 Estrutura do Código
 ```plaintext
